@@ -112,6 +112,14 @@ func Marshal(v any) ([]byte, error) {
 	w := csv.NewWriter(&buf)
 	enc := NewEncoder(w)
 
+	if enc.SkipEmptyColumn {
+		// 检测要导出的列
+		err := enc.DetectMarshalHeaders(v)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if err := enc.encodeHeader(typ); err != nil {
 		return nil, err
 	}

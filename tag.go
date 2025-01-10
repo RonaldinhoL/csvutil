@@ -6,12 +6,13 @@ import (
 )
 
 type tag struct {
-	name      string
-	prefix    string
-	empty     bool
-	omitEmpty bool
-	ignore    bool
-	inline    bool
+	name        string
+	prefix      string
+	empty       bool
+	omitEmpty   bool
+	ignore      bool
+	inline      bool
+	omitmarshal bool // 序列化时忽略此字段
 }
 
 func parseTag(tagname string, field reflect.StructField) (t tag) {
@@ -36,6 +37,8 @@ func parseTag(tagname string, field reflect.StructField) (t tag) {
 		switch tagOpt {
 		case "omitempty":
 			t.omitEmpty = true
+		case "omitmarshal":
+			t.omitmarshal = true
 		case "inline":
 			if walkType(field.Type).Kind() == reflect.Struct {
 				t.inline = true

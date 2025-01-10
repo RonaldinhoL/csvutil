@@ -18,11 +18,12 @@ func cachedFields(k typeKey) fields {
 }
 
 type field struct {
-	name     string
-	baseType reflect.Type
-	typ      reflect.Type
-	tag      tag
-	index    []int
+	name           string
+	baseType       reflect.Type
+	typ            reflect.Type
+	tag            tag
+	index          []int
+	columnNotEmpty bool // 列不为空
 }
 
 type fields []field

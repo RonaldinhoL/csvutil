@@ -105,6 +105,10 @@ type Encoder struct {
 	typeKey    typeKey
 	funcMap    map[reflect.Type]marshalFunc
 	ifaceFuncs []marshalFunc
+
+	SkipOmitMarshalColumn bool       // 跳过标记不导出的列
+	SkipEmptyColumn       bool       // 跳过空的列
+	filterFields          []encField // 要导出的列
 }
 
 // NewEncoder returns a new encoder that writes to w.
@@ -335,7 +339,11 @@ func (e *Encoder) encodeStruct(v reflect.Value) error {
 			return err
 		}
 	}
-	return e.marshal(v)
+	if e.SkipEmptyColumn {
+		return e.marshalWithFilterFields(v)
+	} else {
+		return e.marshal(v)
+	}
 }
 
 func (e *Encoder) encodeArray(v reflect.Value) error {
@@ -349,9 +357,18 @@ func (e *Encoder) encodeArray(v reflect.Value) error {
 }
 
 func (e *Encoder) encodeHeader(typ reflect.Type) error {
-	fields, _, _, record, err := e.cache(typ)
-	if err != nil {
-		return err
+	var fields []encField
+	var record []string
+	var err error
+
+	if e.SkipEmptyColumn {
+		fields = e.filterFields
+		record = make([]string, len(fields))
+	} else {
+		fields, _, _, record, err = e.cache(typ)
+		if err != nil {
+			return err
+		}
 	}
 
 	for i, f := range fields {
@@ -546,4 +563,93 @@ func walkType(typ reflect.Type) reflect.Type {
 type marshalFunc struct {
 	f       func(any) ([]byte, error)
 	argType reflect.Type
+}
+
+/*
+val 必须是一个结构体的列表
+*/
+func (e *Encoder) DetectMarshalHeaders(v any) (err error) {
+	// 列表的值
+	val := walkValue(reflect.ValueOf(v))
+	// 列表元素的类型
+	typ := walkType(val.Type().Elem())
+	fields, _, _, _, err := e.cache(typ)
+	if err != nil {
+		return
+	}
+
+	// 遍历列
+	for _, f := range fields {
+
+		// 跳过不导出的列
+		if f.tag.omitmarshal && e.SkipOmitMarshalColumn {
+			continue
+		}
+		// 遍历行
+		l := val.Len()
+		for i := 0; i < l; i++ {
+			// 获取列表值
+			value := walkValue(val.Index(i))
+
+			v := walkIndex(value, f.index)
+
+			omitempty := f.tag.omitEmpty
+			if v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+				// We should disable omitempty for pointer and interface values,
+				// because if it's nil we will automatically encode it as an empty
+				// string. However, the initialized pointer should not be affected,
+				// even if it's a default value.
+				omitempty = false
+			}
+
+			if !v.IsValid() {
+				continue
+			}
+
+			// 标记列是否为空
+			if !v.IsZero() && omitempty {
+				f.columnNotEmpty = true
+			}
+
+		}
+
+		// 跳过整列为空且标识 omitempty 的列
+		if !f.columnNotEmpty && f.tag.omitEmpty {
+			continue
+		}
+
+		e.filterFields = append(e.filterFields, f)
+	}
+
+	return
+}
+
+func (e *Encoder) marshalWithFilterFields(v reflect.Value) error {
+	var record []string
+
+	for _, f := range e.filterFields {
+		v := walkIndex(v, f.index)
+
+		omitempty := f.tag.omitEmpty
+		if v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+			// We should disable omitempty for pointer and interface values,
+			// because if it's nil we will automatically encode it as an empty
+			// string. However, the initialized pointer should not be affected,
+			// even if it's a default value.
+			omitempty = false
+		}
+
+		var column string
+		if v.IsValid() {
+			buf := make([]byte, 0)
+			b, err := f.encodeFunc(buf, v, omitempty)
+			if err != nil {
+				return err
+			}
+			column = string(b)
+		}
+		record = append(record, column)
+	}
+	//e.c.buf = buf[:0]
+	return e.w.Write(record)
 }
